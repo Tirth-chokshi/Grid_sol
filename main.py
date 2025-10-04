@@ -11,6 +11,7 @@ from typing import List, Dict, Tuple
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from datetime import datetime
+import io
 
 
 class ColorAnalyzer:
@@ -356,6 +357,100 @@ class ImageGridAnalyzer:
         print(f"Saved analysis data: {json_path}")
         return json_path
     
+    def create_watermark_design(self, width: int, height: int, color_rgb: Tuple[int, int, int], opacity: float = 0.3) -> Image.Image:
+        """Create a watermark design with the specified color"""
+        # Create transparent image
+        watermark = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(watermark)
+        
+        # Convert RGB to RGBA with opacity
+        r, g, b = color_rgb
+        alpha = int(255 * opacity)
+        color_rgba = (r, g, b, alpha)
+        
+        # Create a geometric watermark design
+        # Design: Overlapping circles and lines pattern
+        
+        # Calculate sizes based on block dimensions
+        center_x, center_y = width // 2, height // 2
+        max_radius = min(width, height) // 3
+        
+        # Draw concentric circles
+        for i in range(3):
+            radius = max_radius - (i * max_radius // 4)
+            if radius > 0:
+                draw.ellipse(
+                    [center_x - radius, center_y - radius, center_x + radius, center_y + radius],
+                    outline=color_rgba,
+                    width=max(2, width // 100)
+                )
+        
+        # Draw diagonal lines
+        line_width = max(2, width // 150)
+        num_lines = 8
+        for i in range(num_lines):
+            angle = (360 / num_lines) * i
+            # Calculate line endpoints
+            length = min(width, height) // 2.5
+            x1 = center_x + int(length * np.cos(np.radians(angle)))
+            y1 = center_y + int(length * np.sin(np.radians(angle)))
+            x2 = center_x - int(length * np.cos(np.radians(angle)))
+            y2 = center_y - int(length * np.sin(np.radians(angle)))
+            draw.line([x1, y1, x2, y2], fill=color_rgba, width=line_width)
+        
+        # Draw a central star/diamond shape
+        star_size = max_radius // 2
+        points = []
+        for i in range(8):
+            angle = (360 / 8) * i
+            if i % 2 == 0:
+                radius = star_size
+            else:
+                radius = star_size // 2
+            x = center_x + int(radius * np.cos(np.radians(angle - 90)))
+            y = center_y + int(radius * np.sin(np.radians(angle - 90)))
+            points.append((x, y))
+        
+        draw.polygon(points, outline=color_rgba, width=max(2, width // 100))
+        
+        return watermark
+    
+    def apply_watermarks_to_image(self, opacity: float = 0.3) -> str:
+        """Apply watermarks to each block of the image using block's primary color"""
+        print("\nApplying watermarks to blocks...")
+        
+        # Convert numpy array to PIL Image
+        watermarked_image = Image.fromarray(self.image.astype('uint8'), 'RGB')
+        
+        for block_data in self.analysis_results:
+            block_id = block_data['block_id']
+            row, col = block_data['position']['row'], block_data['position']['col']
+            primary_color_rgb = block_data['primary_color']['rgb']
+            
+            # Calculate block boundaries
+            y_start = row * self.block_height
+            y_end = (row + 1) * self.block_height if row < self.rows - 1 else self.height
+            x_start = col * self.block_width
+            x_end = (col + 1) * self.block_width if col < self.cols - 1 else self.width
+            
+            block_width = x_end - x_start
+            block_height = y_end - y_start
+            
+            # Create watermark for this block
+            watermark = self.create_watermark_design(block_width, block_height, primary_color_rgb, opacity)
+            
+            # Paste watermark onto the image
+            watermarked_image.paste(watermark, (x_start, y_start), watermark)
+            
+            print(f"Applied watermark to Block {block_id + 1} with color {block_data['primary_color']['hex']}")
+        
+        # Save watermarked image
+        watermarked_path = os.path.join(self.output_folder, 'watermarked_image.png')
+        watermarked_image.save(watermarked_path, 'PNG')
+        print(f"\nCreated watermarked image: {watermarked_path}")
+        
+        return watermarked_path
+    
     def generate_summary_report(self) -> str:
         """Generate a text summary report"""
         report_lines = []
@@ -395,7 +490,7 @@ class ImageGridAnalyzer:
         print(f"Generated summary report: {report_path}")
         return report_path
     
-    def run_full_analysis(self):
+    def run_full_analysis(self, apply_watermarks: bool = True, watermark_opacity: float = 0.3):
         """Run complete analysis pipeline"""
         print("\n" + "="*80)
         print("STARTING IMAGE GRID COLOR ANALYSIS")
@@ -412,11 +507,17 @@ class ImageGridAnalyzer:
         print("\nCreating grid overlay...")
         overlay_path = self.create_grid_overlay()
         
-        # Step 4: Save JSON data
+        # Step 4: Apply watermarks (new feature)
+        watermarked_path = None
+        if apply_watermarks:
+            print("\nApplying watermarks...")
+            watermarked_path = self.apply_watermarks_to_image(opacity=watermark_opacity)
+        
+        # Step 5: Save JSON data
         print("\nSaving analysis data...")
         json_path = self.save_analysis_json()
         
-        # Step 5: Generate report
+        # Step 6: Generate report
         print("\nGenerating summary report...")
         report_path = self.generate_summary_report()
         
@@ -427,6 +528,8 @@ class ImageGridAnalyzer:
         print(f"\nGenerated files:")
         print(f"  - {len(viz_paths)} visualization image(s)")
         print(f"  - 1 grid overlay image")
+        if watermarked_path:
+            print(f"  - 1 watermarked image")
         print(f"  - 1 JSON data file")
         print(f"  - 1 text report")
         print("\n" + "="*80 + "\n")
@@ -458,10 +561,25 @@ def main():
     
     output_folder = input("Enter output folder name (default: 'output'): ").strip() or "output"
     
+    # Ask about watermarking
+    watermark_choice = input("Apply watermarks to blocks? (yes/no, default: yes): ").strip().lower()
+    apply_watermarks = watermark_choice != 'no'
+    
+    watermark_opacity = 0.3
+    if apply_watermarks:
+        opacity_input = input("Enter watermark opacity (0.1-1.0, default: 0.3): ").strip()
+        if opacity_input:
+            try:
+                watermark_opacity = float(opacity_input)
+                watermark_opacity = max(0.1, min(1.0, watermark_opacity))  # Clamp between 0.1 and 1.0
+            except ValueError:
+                print("Invalid opacity value, using default 0.3")
+                watermark_opacity = 0.3
+    
     # Create analyzer and run
     try:
         analyzer = ImageGridAnalyzer(image_path, rows, cols, output_folder)
-        analyzer.run_full_analysis()
+        analyzer.run_full_analysis(apply_watermarks=apply_watermarks, watermark_opacity=watermark_opacity)
     except Exception as e:
         print(f"\nError during analysis: {str(e)}")
         import traceback
