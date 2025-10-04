@@ -490,7 +490,7 @@ class ImageGridAnalyzer:
         print(f"Generated summary report: {report_path}")
         return report_path
     
-    def run_full_analysis(self, apply_watermarks: bool = True, watermark_opacity: float = 0.3):
+    def run_full_analysis(self, create_visualizations: bool = True, apply_watermarks: bool = True, watermark_opacity: float = 0.3):
         """Run complete analysis pipeline"""
         print("\n" + "="*80)
         print("STARTING IMAGE GRID COLOR ANALYSIS")
@@ -499,15 +499,17 @@ class ImageGridAnalyzer:
         # Step 1: Analyze blocks
         self.analyze_all_blocks()
         
-        # Step 2: Create visualizations
-        print("\nCreating visualizations...")
-        viz_paths = self.create_grid_visualization()
+        # Step 2: Create visualizations (optional)
+        viz_paths = []
+        if create_visualizations:
+            print("\nCreating visualizations...")
+            viz_paths = self.create_grid_visualization()
         
         # Step 3: Create grid overlay
         print("\nCreating grid overlay...")
         overlay_path = self.create_grid_overlay()
         
-        # Step 4: Apply watermarks (new feature)
+        # Step 4: Apply watermarks (optional)
         watermarked_path = None
         if apply_watermarks:
             print("\nApplying watermarks...")
@@ -526,7 +528,8 @@ class ImageGridAnalyzer:
         print("="*80)
         print(f"\nOutput folder: {self.output_folder}")
         print(f"\nGenerated files:")
-        print(f"  - {len(viz_paths)} visualization image(s)")
+        if viz_paths:
+            print(f"  - {len(viz_paths)} visualization image(s)")
         print(f"  - 1 grid overlay image")
         if watermarked_path:
             print(f"  - 1 watermarked image")
@@ -561,6 +564,10 @@ def main():
     
     output_folder = input("Enter output folder name (default: 'output'): ").strip() or "output"
     
+    # Ask about visualizations
+    viz_choice = input("Create detailed visualizations? (yes/no, default: yes): ").strip().lower()
+    create_visualizations = viz_choice != 'no'
+    
     # Ask about watermarking
     watermark_choice = input("Apply watermarks to blocks? (yes/no, default: yes): ").strip().lower()
     apply_watermarks = watermark_choice != 'no'
@@ -579,7 +586,7 @@ def main():
     # Create analyzer and run
     try:
         analyzer = ImageGridAnalyzer(image_path, rows, cols, output_folder)
-        analyzer.run_full_analysis(apply_watermarks=apply_watermarks, watermark_opacity=watermark_opacity)
+        analyzer.run_full_analysis(create_visualizations=create_visualizations, apply_watermarks=apply_watermarks, watermark_opacity=watermark_opacity)
     except Exception as e:
         print(f"\nError during analysis: {str(e)}")
         import traceback
