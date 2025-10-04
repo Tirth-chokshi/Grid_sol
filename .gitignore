@@ -83,6 +83,15 @@ Thumbs.db
 !sample_*.jpg
 !sample_*.png
 
+# Video files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.flv
+*.wmv
+*.webm
+
 # Output directories
 output/
 *_output/
