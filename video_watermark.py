@@ -67,9 +67,24 @@ class ColorAnalyzer:
         if len(pixels) == 0:
             pixels = block.reshape(-1, 3)
         
+        # Optimize: Sample pixels if block is too large (>10000 pixels)
+        if len(pixels) > 10000:
+            # Randomly sample pixels to speed up k-means
+            sample_size = 10000
+            indices = np.random.choice(len(pixels), size=sample_size, replace=False)
+            pixels = pixels[indices]
+        
         # K-means clustering to find dominant colors
         n_colors = min(self.n_colors, len(pixels))
-        kmeans = KMeans(n_clusters=n_colors, random_state=42, n_init=10)
+        # Suppress warnings with proper parameters
+        kmeans = KMeans(
+            n_clusters=n_colors, 
+            random_state=42, 
+            n_init='auto',  # Use 'auto' to suppress FutureWarning
+            max_iter=300,   # Maximum iterations for convergence
+            tol=1e-4,       # Tolerance for convergence
+            algorithm='lloyd'  # Explicit algorithm selection
+        )
         kmeans.fit(pixels)
         
         # Get color percentages
@@ -117,6 +132,9 @@ class VideoWatermarkProcessor:
         self.output_folder = output_folder
         self.color_analyzer = ColorAnalyzer()
         
+        # Cache for watermark designs to avoid recreating identical watermarks
+        self.watermark_cache = {}
+        
         # Create output folder
         Path(self.output_folder).mkdir(parents=True, exist_ok=True)
         
@@ -142,6 +160,10 @@ class VideoWatermarkProcessor:
         print(f"  Duration: {self.total_frames/self.fps:.2f} seconds")
         print(f"  Block Size: {self.block_width}x{self.block_height}")
     
+    def clear_cache(self):
+        """Clear the watermark cache to free memory"""
+        self.watermark_cache.clear()
+    
     def analyze_frame_blocks(self, frame: np.ndarray) -> List[Dict]:
         """Analyze all blocks in a single frame"""
         analysis_results = []
@@ -161,7 +183,14 @@ class VideoWatermarkProcessor:
         return analysis_results
     
     def create_watermark_design(self, width: int, height: int, color_rgb: Tuple[int, int, int], opacity: float = 0.3) -> Image.Image:
-        """Create a watermark design with the specified color"""
+        """Create a watermark design with the specified color (with caching)"""
+        # Create cache key from parameters
+        cache_key = (width, height, color_rgb, opacity)
+        
+        # Return cached watermark if it exists
+        if cache_key in self.watermark_cache:
+            return self.watermark_cache[cache_key].copy()
+        
         # Create transparent image
         watermark = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(watermark)
@@ -212,11 +241,14 @@ class VideoWatermarkProcessor:
         
         draw.polygon(points, outline=color_rgba, width=max(2, width // 100))
         
+        # Cache the watermark for reuse
+        self.watermark_cache[cache_key] = watermark.copy()
+        
         return watermark
     
     def apply_watermark_to_frame(self, frame: np.ndarray, analysis_results: List[Dict], opacity: float = 0.3) -> np.ndarray:
-        """Apply watermarks to a single frame"""
-        # Convert numpy array to PIL Image
+        """Apply watermarks to a single frame (optimized)"""
+        # Convert numpy array to PIL Image (reuse conversion)
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         watermarked_frame = Image.fromarray(frame_rgb.astype('uint8'))
         
@@ -233,7 +265,7 @@ class VideoWatermarkProcessor:
             block_width = x_end - x_start
             block_height = y_end - y_start
             
-            # Create watermark for this block
+            # Create watermark for this block (uses cache internally)
             watermark = self.create_watermark_design(block_width, block_height, primary_color_rgb, opacity)
             
             # Paste watermark onto the frame
@@ -329,6 +361,8 @@ class VideoWatermarkProcessor:
         print(f"Frames analyzed: {processed_count}")
         print(f"Grid size: {self.rows}x{self.cols}")
         print(f"Watermark opacity: {opacity}")
+        print(f"Watermark cache size: {len(self.watermark_cache)} unique designs")
+        print(f"Cache efficiency: {(frame_count * self.rows * self.cols - len(self.watermark_cache)) / max(1, frame_count * self.rows * self.cols) * 100:.1f}% reuse")
         print("\n" + "="*80 + "\n")
         
         return output_path
