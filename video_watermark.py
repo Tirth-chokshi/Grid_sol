@@ -11,6 +11,11 @@ from typing import List, Dict, Tuple
 from datetime import datetime
 import io
 import time
+import warnings
+
+# Suppress sklearn convergence warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='sklearn')
+warnings.filterwarnings('ignore', message='.*Number of distinct clusters.*')
 
 
 class ColorAnalyzer:
@@ -74,18 +79,45 @@ class ColorAnalyzer:
             indices = np.random.choice(len(pixels), size=sample_size, replace=False)
             pixels = pixels[indices]
         
+        # Determine number of unique colors in the sample
+        unique_colors = len(np.unique(pixels, axis=0))
+        n_colors = min(self.n_colors, len(pixels), unique_colors)
+        
+        # If only 1 unique color, handle it directly without k-means
+        if n_colors <= 1:
+            avg_color = np.mean(pixels, axis=0).astype(int)
+            rgb = tuple(avg_color)
+            return {
+                'primary_color': {
+                    'rgb': rgb,
+                    'hex': self.rgb_to_hex(rgb),
+                    'name': self.get_color_name(rgb),
+                    'percentage': 100.0
+                },
+                'color_palette': [{
+                    'rgb': rgb,
+                    'hex': self.rgb_to_hex(rgb),
+                    'name': self.get_color_name(rgb),
+                    'percentage': 100.0
+                }],
+                'brightness': round(colorsys.rgb_to_hsv(rgb[0]/255, rgb[1]/255, rgb[2]/255)[2] * 100, 2),
+                'saturation': round(colorsys.rgb_to_hsv(rgb[0]/255, rgb[1]/255, rgb[2]/255)[1] * 100, 2),
+                'dominant_hue': round(colorsys.rgb_to_hsv(rgb[0]/255, rgb[1]/255, rgb[2]/255)[0] * 360, 2)
+            }
+        
         # K-means clustering to find dominant colors
-        n_colors = min(self.n_colors, len(pixels))
         # Suppress warnings with proper parameters
-        kmeans = KMeans(
-            n_clusters=n_colors, 
-            random_state=42, 
-            n_init='auto',  # Use 'auto' to suppress FutureWarning
-            max_iter=300,   # Maximum iterations for convergence
-            tol=1e-4,       # Tolerance for convergence
-            algorithm='lloyd'  # Explicit algorithm selection
-        )
-        kmeans.fit(pixels)
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            kmeans = KMeans(
+                n_clusters=n_colors, 
+                random_state=42, 
+                n_init='auto',  # Use 'auto' to suppress FutureWarning
+                max_iter=300,   # Maximum iterations for convergence
+                tol=1e-4,       # Tolerance for convergence
+                algorithm='lloyd'  # Explicit algorithm selection
+            )
+            kmeans.fit(pixels)
         
         # Get color percentages
         labels = kmeans.labels_
